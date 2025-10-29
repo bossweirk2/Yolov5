@@ -1,178 +1,106 @@
 import cv2
 import streamlit as st
 import numpy as np
-import pandas as pd
 import torch
 import os
 import sys
+import pandas as pd
+import random
 
-# Configuración de página Streamlit
+# Configuración de la página
 st.set_page_config(
-    page_title="Detección de Objetos en Tiempo Real",
-    page_icon="🔍",
+    page_title="🔮 El Oráculo Visual",
+    page_icon="✨",
     layout="wide"
 )
 
-# Función para cargar el modelo YOLOv5 de manera compatible con versiones anteriores de PyTorch
+# --- Cargar modelo YOLOv5 ---
 @st.cache_resource
-def load_yolov5_model(model_path='yolov5s.pt'):
+def load_yolov5_model():
     try:
-        # Importar yolov5
         import yolov5
-        
-        # Para versiones de PyTorch anteriores a 2.0, cargar directamente con weights_only=False
-        # o usar el parámetro map_location para asegurar compatibilidad
-        try:
-            # Primer método: cargar con weights_only=False si la versión lo soporta
-            model = yolov5.load(model_path, weights_only=False)
-            return model
-        except TypeError:
-            # Segundo método: si el primer método falla, intentar un enfoque más básico
-            try:
-                model = yolov5.load(model_path)
-                return model
-            except Exception as e:
-                # Si todo falla, intentar cargar el modelo con torch directamente
-                st.warning(f"Intentando método alternativo de carga...")
-                
-                # Modificar sys.path temporalmente para poder importar torch correctamente
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                if current_dir not in sys.path:
-                    sys.path.append(current_dir)
-                
-                # Cargar el modelo con torch directamente
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-                return model
-    
+        model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+        return model
     except Exception as e:
-        st.error(f"❌ Error al cargar el modelo: {str(e)}")
-        st.info("""
-        Recomendaciones:
-        1. Instalar una versión compatible de PyTorch y YOLOv5:
-           ```
-           pip install torch==1.12.0 torchvision==0.13.0
-           pip install yolov5==7.0.9
-           ```
-        2. Asegúrate de tener el archivo del modelo en la ubicación correcta
-        3. Si el problema persiste, intenta descargar el modelo directamente de torch hub
-        """)
+        st.error(f"❌ No se pudo cargar YOLOv5: {e}")
         return None
 
-# Título y descripción de la aplicación
-st.title("🔍 Detección de Objetos en Imágenes")
+st.title("🔮 El Oráculo Visual")
 st.markdown("""
-Esta aplicación utiliza YOLOv5 para detectar objetos en imágenes capturadas con tu cámara.
-Ajusta los parámetros en la barra lateral para personalizar la detección.
+El Oráculo observa tu entorno a través de la cámara y transforma lo que ve en visiones simbólicas.  
+Cada objeto es una señal, cada forma es un mensaje del destino.
 """)
 
-# Cargar el modelo
-with st.spinner("Cargando modelo YOLOv5..."):
+# Cargar modelo
+with st.spinner("Invocando al Oráculo..."):
     model = load_yolov5_model()
 
-# Si el modelo se cargó correctamente, configuramos los parámetros
 if model:
-    # Sidebar para los parámetros de configuración
-    st.sidebar.title("Parámetros")
-    
-    # Ajustar parámetros del modelo
-    with st.sidebar:
-        st.subheader('Configuración de detección')
-        model.conf = st.slider('Confianza mínima', 0.0, 1.0, 0.25, 0.01)
-        model.iou = st.slider('Umbral IoU', 0.0, 1.0, 0.45, 0.01)
-        st.caption(f"Confianza: {model.conf:.2f} | IoU: {model.iou:.2f}")
-        
-        # Opciones adicionales
-        st.subheader('Opciones avanzadas')
-        try:
-            model.agnostic = st.checkbox('NMS class-agnostic', False)
-            model.multi_label = st.checkbox('Múltiples etiquetas por caja', False)
-            model.max_det = st.number_input('Detecciones máximas', 10, 2000, 1000, 10)
-        except:
-            st.warning("Algunas opciones avanzadas no están disponibles con esta configuración")
-    
-    # Contenedor principal para la cámara y resultados
-    main_container = st.container()
-    
-    with main_container:
-        # Capturar foto con la cámara
-        picture = st.camera_input("Capturar imagen", key="camera")
-        
-        if picture:
-            # Procesar la imagen capturada
-            bytes_data = picture.getvalue()
-            cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
-            
-            # Realizar la detección
-            with st.spinner("Detectando objetos..."):
-                try:
-                    results = model(cv2_img)
-                except Exception as e:
-                    st.error(f"Error durante la detección: {str(e)}")
-                    st.stop()
-            
-            # Parsear resultados
-            try:
-                predictions = results.pred[0]
-                boxes = predictions[:, :4]
-                scores = predictions[:, 4]
-                categories = predictions[:, 5]
-                
-                # Mostrar resultados
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.subheader("Imagen con detecciones")
-                    # Renderizar las detecciones
-                    results.render()
-                    # Mostrar imagen con las detecciones
-                    st.image(cv2_img, channels='BGR', use_container_width=True)
-                
-                with col2:
-                    st.subheader("Objetos detectados")
-                    
-                    # Obtener nombres de etiquetas
-                    label_names = model.names
-                    
-                    # Contar categorías
-                    category_count = {}
-                    for category in categories:
-                        category_idx = int(category.item()) if hasattr(category, 'item') else int(category)
-                        if category_idx in category_count:
-                            category_count[category_idx] += 1
-                        else:
-                            category_count[category_idx] = 1
-                    
-                    # Crear dataframe para mostrar resultados
-                    data = []
-                    for category, count in category_count.items():
-                        label = label_names[category]
-                        confidence = scores[categories == category].mean().item() if len(scores) > 0 else 0
-                        data.append({
-                            "Categoría": label,
-                            "Cantidad": count,
-                            "Confianza promedio": f"{confidence:.2f}"
-                        })
-                    
-                    if data:
-                        df = pd.DataFrame(data)
-                        st.dataframe(df, use_container_width=True)
-                        
-                        # Mostrar gráfico de barras
-                        st.bar_chart(df.set_index('Categoría')['Cantidad'])
-                    else:
-                        st.info("No se detectaron objetos con los parámetros actuales.")
-                        st.caption("Prueba a reducir el umbral de confianza en la barra lateral.")
-            except Exception as e:
-                st.error(f"Error al procesar los resultados: {str(e)}")
-                st.stop()
-else:
-    st.error("No se pudo cargar el modelo. Por favor verifica las dependencias e inténtalo nuevamente.")
-    st.stop()
+    # Cámara
+    picture = st.camera_input("Mira hacia el ojo del Oráculo 👁️")
 
-# Información adicional y pie de página
-st.markdown("---")
-st.caption("""
-**Acerca de la aplicación**: Esta aplicación utiliza YOLOv5 para detección de objetos en tiempo real.
-Desarrollada con Streamlit y PyTorch.
-""")
+    if picture:
+        bytes_data = picture.getvalue()
+        cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+
+        with st.spinner("El Oráculo está interpretando tu visión..."):
+            results = model(cv2_img)
+            detections = results.pandas().xyxy[0]  # dataframe con resultados
+
+        if not detections.empty:
+            # --- PARTE 1: Mostrar detecciones literales ---
+            st.subheader("👁️ El Oráculo ha visto:")
+            detected_objects = detections['name'].unique().tolist()
+            detected_str = ", ".join(detected_objects)
+            st.write(f"**{detected_str.capitalize()}**")
+
+            # --- PARTE 2: Interpretación simbólica ---
+            st.markdown("---")
+            st.subheader("🔮 Lectura simbólica:")
+
+            # Diccionario de significados simbólicos
+            symbols = {
+                "person": "Una presencia cercana influye en tu destino.",
+                "car": "Un viaje importante se aproxima, físico o espiritual.",
+                "dog": "La lealtad será puesta a prueba.",
+                "cat": "La intuición te guiará si sabes escucharla.",
+                "cup": "Un nuevo comienzo se está gestando.",
+                "cell phone": "Un mensaje o noticia está por llegar.",
+                "book": "La sabiduría que buscas está más cerca de lo que crees.",
+                "chair": "Es momento de descansar antes del siguiente paso.",
+                "bottle": "Un secreto guardado desea salir a la luz.",
+                "tv": "Tu atención moldea la realidad; elige bien en qué mirar.",
+                "bicycle": "El equilibrio es la clave del movimiento.",
+                "clock": "El tiempo te observa tanto como tú a él.",
+                "knife": "Rompe lo que te ata, pero con cuidado.",
+                "apple": "La tentación se disfraza de belleza.",
+                "bed": "Tu mente necesita reposo para continuar el viaje.",
+            }
+
+            # Generar lecturas únicas
+            messages = []
+            for obj in detected_objects:
+                meaning = symbols.get(obj, f"El {obj} encierra un mensaje aún no revelado.")
+                messages.append(f"**{obj.capitalize()}** — {meaning}")
+
+            for msg in messages:
+                st.markdown(f"🌫️ {msg}")
+
+            # --- PARTE 3: Mostrar imagen con cajas ---
+            st.markdown("---")
+            st.subheader("🖼️ La visión del Oráculo:")
+            results.render()
+            st.image(results.ims[0], channels="BGR", use_container_width=True)
+
+            # --- PARTE 4: Bonus aleatorio ---
+            st.markdown("---")
+            st.caption(random.choice([
+                "✨ El destino se mueve cuando tú lo miras.",
+                "🌙 A veces lo invisible pesa más que lo que ves.",
+                "🔥 No todos los signos son para ser comprendidos.",
+                "🌊 El oráculo solo revela lo que ya sabes."
+            ]))
+        else:
+            st.info("El Oráculo no ha reconocido ningún símbolo. Intenta otra visión con más luz o distintos objetos.")
+else:
+    st.error("No se pudo invocar al Oráculo. Revisa tus dependencias o conexión a PyTorch/YOLOv5.")
